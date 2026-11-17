@@ -3,28 +3,24 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from app.retrieval import retrieve_relevant_chunks
+from langchain_core.runnables import RunnablePassthrough
+from app.retrieval import get_rag_retriever
 
 load_dotenv()
 
 def get_rag_chain():
     """
-    Initializes the Gemini LLM and builds the RAG prompt chain.
+    Initializes the Gemini LLM and builds the RAG prompt chain using LCEL.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-    # Initialize Gemini chat model
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
         google_api_key=api_key,
         temperature=0.1
     )
 
-    
-
-    # Define prompt template enforcing grounding and source citations
     template = """You are an expert financial analyst assistant. Answer the user's question accurately using ONLY the provided context from the financial report.
 If the answer cannot be found within the provided context, explicitly state that the information is absent from the document. Do not invent or fabricate any answers.
 Always cite the source page numbers referenced in the context.
@@ -37,57 +33,54 @@ Question:
 
 Answer:
 """
-
     prompt = ChatPromptTemplate.from_template(template)
-    
-    # Chain components together
-    chain = prompt | llm | StrOutputParser()
-    return chain
+    return prompt | llm | StrOutputParser()
 
-def answer_question(query: str, k: int = 4) -> dict:
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+def answer_question(query: str, k: int = 4):
     """
-    Executes the full RAG pipeline: retrieval -> context assembly -> Gemini answer generation.
-    Returns the generated answer and the source references.
+    Executes the 100% LangChain-native RAG pipeline using LCEL primitives.
     """
-    # 1. Retrieve relevant chunks
-    docs_with_scores = retrieve_relevant_chunks(query, k=k)
-    
-    if not docs_with_scores:
-        return {
-            "answer": "No relevant information found in the document.",
-            "sources": []
-        }
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-    # 2. Format context and collect unique sources
-    context_texts = []
-    sources = set()
-    
-    for doc, score in docs_with_scores:
-        page_num = doc.metadata.get("page", "Unknown")
-        source_file = os.path.basename(doc.metadata.get("source", "Report"))
-        context_texts.append(f"[Source: {source_file}, Page {page_num}]\n{doc.page_content}")
-        sources.add(f"{source_file} (Page {page_num})")
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=api_key,
+        temperature=0.1
+    )
 
-    combined_context = "\n\n---\n\n".join(context_texts)
+    retriever = get_rag_retriever(k=k)
+    source_docs = retriever.invoke(query)
 
-    # 3. Generate answer using Gemini chain
-    chain = get_rag_chain()
-    print("Generating answer from Gemini...")
-    answer = chain.invoke({"context": combined_context, "question": query})
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are an expert financial analyst assistant. Answer accurately using ONLY the provided context. Cite source pages.\n\nContext:\n{context}"),
+        ("human", "{question}")
+    ])
+
+    rag_chain = (
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    print(f"Executing LCEL RAG chain for query: '{query}'...")
+    answer = rag_chain.invoke(query)
+
+    sources = []
+    for doc in source_docs:
+        source_file = doc.metadata.get("source", "unknown_file")
+        page_num = doc.metadata.get("page", doc.metadata.get("page_number", "N/A"))
+        page_label = f"Page {page_num + 1}" if isinstance(page_num, int) else f"Page {page_num}"
+        sources.append(f"{source_file} ({page_label})")
+
+    sources = list(dict.fromkeys(sources))
 
     return {
         "answer": answer,
-        "sources": list(sources)
+        "sources": sources
     }
-
-if __name__ == "__main__":
-    # Quick test snippet
-    test_query = "What were the total revenues reported?"
-    try:
-        result = answer_question(test_query)
-        print("\n--- Answer ---")
-        print(result["answer"])
-        print("\n--- Sources ---")
-        print(result["sources"])
-    except Exception as e:
-        print(f"RAG chain test error: {e}")
