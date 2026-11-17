@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -16,10 +17,25 @@ def get_rag_chain():
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-    llm = ChatGoogleGenerativeAI(
-        google_api_key=api_key,
-        temperature=0.1
+    # llm = ChatGoogleGenerativeAI(
+    #     google_api_key=api_key,
+    #     temperature=0.1
+    # )
+
+    primary_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0,
+    max_retries=1,  # Fail fast so Groq takes over quickly
     )
+
+    fallback_llm = ChatGroq(
+        model="openai/gpt-oss-120b",
+        temperature=0,
+        max_retries=2,
+    )
+
+    # Seamless LCEL fallback wrapper
+    llm = primary_llm.with_fallbacks([fallback_llm])
 
     template = """You are an expert financial analyst assistant. Answer the user's question accurately using ONLY the provided context from the financial report.
 If the answer cannot be found within the provided context, explicitly state that the information is absent from the document. Do not invent or fabricate any answers.
@@ -47,11 +63,26 @@ def answer_question(query: str, k: int = 4):
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=api_key,
-        temperature=0.1
+    # llm = ChatGoogleGenerativeAI(
+    #     model="gemini-2.5-flash",
+    #     google_api_key=api_key,
+    #     temperature=0.1
+    # )
+
+    fallback_llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0,
+    max_retries=1,  # Fail fast so Groq takes over quickly
     )
+
+    primary_llm = ChatGroq(
+        model="openai/gpt-oss-120b",
+        temperature=0,
+        max_retries=2,
+    )
+
+    # Seamless LCEL fallback wrapper
+    llm = primary_llm.with_fallbacks([fallback_llm])
 
     retriever = get_rag_retriever(k=k)
     source_docs = retriever.invoke(query)
