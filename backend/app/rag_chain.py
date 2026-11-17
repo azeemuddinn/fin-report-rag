@@ -9,34 +9,31 @@ from app.retrieval import get_rag_retriever
 
 load_dotenv()
 
-def get_rag_chain():
-    """
-    Initializes the Gemini LLM and builds the RAG prompt chain using LCEL.
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is missing.")
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY environment variable is missing.")
 
-    # llm = ChatGoogleGenerativeAI(
-    #     google_api_key=api_key,
-    #     temperature=0.1
-    # )
-
-    primary_llm = ChatGoogleGenerativeAI(
+# Define resilient LLM at the MODULE level so it can be imported elsewhere
+primary_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0,
-    max_retries=1,  # Fail fast so Groq takes over quickly
-    )
+    max_retries=1,
+)
 
-    fallback_llm = ChatGroq(
-        model="openai/gpt-oss-120b",
-        temperature=0,
-        max_retries=2,
-    )
+fallback_llm = ChatGroq(
+    model="openai/gpt-oss-120b",
+    temperature=0,
+    max_retries=2,
+)
 
-    # Seamless LCEL fallback wrapper
-    llm = primary_llm.with_fallbacks([fallback_llm])
+# Seamless LCEL fallback wrapper exported globally
+llm = primary_llm.with_fallbacks([fallback_llm])
 
+
+def get_rag_chain():
+    """
+    Initializes the RAG prompt chain using LCEL with module-level llm.
+    """
     template = """You are an expert financial analyst assistant. Answer the user's question accurately using ONLY the provided context from the financial report.
 If the answer cannot be found within the provided context, explicitly state that the information is absent from the document. Do not invent or fabricate any answers.
 Always cite the source page numbers referenced in the context.
@@ -52,38 +49,15 @@ Answer:
     prompt = ChatPromptTemplate.from_template(template)
     return prompt | llm | StrOutputParser()
 
+
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
+
 
 def answer_question(query: str, k: int = 4):
     """
     Executes the 100% LangChain-native RAG pipeline using LCEL primitives.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is missing.")
-
-    # llm = ChatGoogleGenerativeAI(
-    #     model="gemini-2.5-flash",
-    #     google_api_key=api_key,
-    #     temperature=0.1
-    # )
-
-    fallback_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0,
-    max_retries=1,  # Fail fast so Groq takes over quickly
-    )
-
-    primary_llm = ChatGroq(
-        model="openai/gpt-oss-120b",
-        temperature=0,
-        max_retries=2,
-    )
-
-    # Seamless LCEL fallback wrapper
-    llm = primary_llm.with_fallbacks([fallback_llm])
-
     retriever = get_rag_retriever(k=k)
     source_docs = retriever.invoke(query)
 
