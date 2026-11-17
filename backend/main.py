@@ -5,11 +5,21 @@ from app.ingestion import load_pdf
 from app.chunking import chunk_documents
 from app.vector_store import store_chunks
 from app.rag_chain import answer_question
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI(
     title="FinReport RAG API", 
     description="API for ingesting financial PDF reports and querying them using Gemini and Supabase pgvector.",
     version="1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 DOCUMENTS_DIR = "documents"
@@ -67,4 +77,7 @@ def ask_question(request: QueryRequest):
             "sources": result["sources"]
         }
     except Exception as e:
+        print("--- RAG ERROR TRACEBACK ---")
+        traceback.print_exc()
+        print("---------------------------")
         raise HTTPException(status_code=500, detail=f"RAG execution error: {str(e)}")

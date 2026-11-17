@@ -17,10 +17,12 @@ def get_rag_chain():
 
     # Initialize Gemini chat model
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         google_api_key=api_key,
         temperature=0.1
     )
+
+    
 
     # Define prompt template enforcing grounding and source citations
     template = """You are an expert financial analyst assistant. Answer the user's question accurately using ONLY the provided context from the financial report.
